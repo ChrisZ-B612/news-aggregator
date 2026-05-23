@@ -24,48 +24,9 @@ limitations under the License.
   <meta name="viewport" content="width=device-width">
   <meta name="theme-color" content="#FF6F00">
 
-  <script src="third_party/handlebars-v3.0.0.js"></script>
-  <script>
-  if (typeof window.Intl !== 'undefined') {
-    document.write('<script src="third_party/handlebars-intl.min.js"><\/script>');
-  }
-  </script>
-
-  <script id="tmpl-story" type="text/x-handlebars-template">
-    <h1 class="story__title">{{ title }}</h1>
-    <div class="story__score">{{ score }}</div>
-    <div class="story__by">Posted by {{ by }}{{#if time }}, {{ formatRelative time }}{{/if }}
-    </div>
-  </script>
-
-  <script id="tmpl-story-details" type="text/x-handlebars-template">
-    <header class="story-details__header js-header">
-      <h1 class="story-details__title">{{ title }}{{#if url }} <a class="story-details__title-link" href="{{url}}">({{ urlobj.hostname }})</a>{{/if}}</h1>
-      <button class="story-details__close js-close">Close</button>
-      <section class="story-details__meta">
-        Posted by {{ by }}{{#if time }}, {{ formatRelative time }}{{/if }}
-      </section>
-    </header>
-
-    <section class="story-details__content js-content">
-      <div>
-        <a class="story-details__link" href="{{ url }}">Visit site</a>
-      </div>
-
-      {{#if kids}}
-      <section class="story-details__comments js-comments">
-        <h2 class="story-details__comments-title">Comments</h2>
-      </section>
-      {{/if}}
-    </section>
-  </script>
-
-  <script id="tmpl-story-details-comment" type="text/x-handlebars-template">
-    <p class="story-details-comment__author">{{ by }}{{#if time }}, {{ formatRelative time }}{{/if }}</p>
-    <div class="story-details-comment__text">{{{ text }}}</div>
-  </script>
-
-  <link href='http://fonts.googleapis.com/css?family=Roboto:400,500,700' rel='stylesheet' type='text/css'>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet" type="text/css">
   <link rel="stylesheet" href="styles/app.css">
 
   </head>
