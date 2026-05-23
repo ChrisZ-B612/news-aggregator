@@ -75,6 +75,7 @@ a {
   bottom: 16px;
   -webkit-transform-origin: 0 100%;
           transform-origin: 0 100%;
+  will-change: transform;
 }
 
 .header__title {
@@ -90,17 +91,6 @@ a {
   padding: 0;
   margin: 0;
   opacity: 0.54;
-}
-
-body.details-active .story__title,
-body.details-active .story__by,
-body.details-active .story__score {
-  transition: opacity 0.5s ease-out;
-  opacity: 0 !important;
-}
-
-body.details-active .story {
-  background: linear-gradient(to bottom, #FFF 0%, #FFF 100%);
 }
 
 body.raised .header {
@@ -174,6 +164,7 @@ main.loading {
   margin: 0;
   padding: 0;
   line-height: 32px;
+  will-change: opacity;
 }
 
 .story__by,
@@ -204,6 +195,16 @@ main.loading {
       0px 2px 7px 0px rgba(0, 0, 0, 0.10);
 }
 
+.story__index {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 24px;
+  color: red;
+  border: 1px dashed;
+  padding: 2px;
+}
+
 .story-details {
   display: -webkit-flex;
   display: -ms-flexbox;
@@ -224,10 +225,9 @@ main.loading {
       -webkit-align-content: stretch;
           align-content: stretch;
 
-  opacity: 0;
   position: fixed;
   top: 0;
-  left: 100%;
+  left: 0;
   width: 100%;
   height: 100%;
   background: white;
@@ -238,12 +238,15 @@ main.loading {
       0px 2px 7px 0px rgba(0, 0, 0, 0.10);
 
   overflow: hidden;
-  transition: opacity 0.3s ease-out;
+  opacity: 0;
+  transform: translateX(100%);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  /*will-change: opacity, transform;*/ // position: fixed 已经有提升 Compositing layer 的效果了
 }
 
-.story-details * {
-  will-change: transform;
-  transform: translateZ(0);
+.story-details.show {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .story-details__content {
