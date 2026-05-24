@@ -17,325 +17,437 @@
 APP.Main = (function() {
 
   var LAZY_LOAD_THRESHOLD = 300;
+  var BATCH_SIZE = 30;
+  var MAX_STORY_REQUESTS = 6;
+  var COMMENT_BATCH_SIZE = 12;
+  var COMMENT_LOAD_THRESHOLD = 500;
+
   var $ = document.querySelector.bind(document);
+  var main = $('main');
+  var header = $('header');
+  var headerTitles = header.querySelector('.header__title-wrapper');
 
   var stories = null;
   var storyStart = 0;
-  var count = 100;
-  var main = $('main');
+  var storyBatchLoading = false;
+  var activeStoryRequests = 0;
+  var storyRequestQueue = [];
   var inDetails = false;
-  var storyLoadCount = 0;
-  var localeData = {
-    data: {
-      intl: {
-        locales: 'en-US'
-      }
-    }
-  };
+  var scrollUpdateScheduled = false;
+  var visualUpdateScheduled = false;
+  var relativeTimeFormatter = typeof Intl !== 'undefined' &&
+      Intl.RelativeTimeFormat ?
+      new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' }) :
+      null;
 
-  var tmplStory = $('#tmpl-story').textContent;
-  var tmplStoryDetails = $('#tmpl-story-details').textContent;
-  var tmplStoryDetailsComment = $('#tmpl-story-details-comment').textContent;
+  function escapeHTML(value) {
+    if (value === null || typeof value === 'undefined')
+      return '';
 
-  if (typeof HandlebarsIntl !== 'undefined') {
-    HandlebarsIntl.registerWith(Handlebars);
-  } else {
-
-    // Remove references to formatRelative, because Intl isn't supported.
-    var intlRelative = /, {{ formatRelative time }}/;
-    tmplStory = tmplStory.replace(intlRelative, '');
-    tmplStoryDetails = tmplStoryDetails.replace(intlRelative, '');
-    tmplStoryDetailsComment = tmplStoryDetailsComment.replace(intlRelative, '');
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
   }
 
-  var storyTemplate =
-      Handlebars.compile(tmplStory);
-  var storyDetailsTemplate =
-      Handlebars.compile(tmplStoryDetails);
-  var storyDetailsCommentTemplate =
-      Handlebars.compile(tmplStoryDetailsComment);
+  function escapeAttribute(value) {
+    return escapeHTML(value).replace(/`/g, '&#96;');
+  }
 
-  /**
-   * As every single story arrives in shove its
-   * content in at that exact moment. Feels like something
-   * that should really be handled more delicately, and
-   * probably in a requestAnimationFrame callback.
-   */
-  function onStoryData (key, details) {
+  function formatRelative(time) {
+    if (!time)
+      return '';
 
-    // This seems odd. Surely we could just select the story
-    // directly rather than looping through all of them.
-    var storyElements = document.querySelectorAll('.story');
+    var diff = time - Date.now();
+    var absDiff = Math.abs(diff);
+    var divisions = [
+      { amount: 60 * 1000, name: 'second' },
+      { amount: 60 * 60 * 1000, name: 'minute' },
+      { amount: 24 * 60 * 60 * 1000, name: 'hour' },
+      { amount: 30 * 24 * 60 * 60 * 1000, name: 'day' },
+      { amount: 365 * 24 * 60 * 60 * 1000, name: 'month' },
+      { amount: Infinity, name: 'year' }
+    ];
+    var previousAmount = 1000;
 
-    for (var i = 0; i < storyElements.length; i++) {
+    for (var i = 0; i < divisions.length; i++) {
+      if (absDiff < divisions[i].amount) {
+        var value = Math.round(diff / previousAmount);
 
-      if (storyElements[i].getAttribute('id') === 's-' + key) {
+        if (relativeTimeFormatter)
+          return relativeTimeFormatter.format(value, divisions[i].name);
 
-        details.time *= 1000;
-        var story = storyElements[i];
-        var html = storyTemplate(details);
-        story.innerHTML = html;
-        story.addEventListener('click', onStoryClick.bind(this, details));
-        story.classList.add('clickable');
-
-        // Tick down. When zero we can batch in the next load.
-        storyLoadCount--;
-
+        value = Math.abs(value);
+        return value + ' ' + divisions[i].name +
+            (value === 1 ? '' : 's') + (diff < 0 ? ' ago' : '');
       }
+
+      previousAmount = divisions[i].amount;
     }
 
-    // Colorize on complete.
-    if (storyLoadCount === 0)
-      colorizeAndScaleStories();
+    return '';
+  }
+
+  function storyTemplate(details) {
+    var relativeTime = details.time ? ', ' + formatRelative(details.time) : '';
+
+    return '<h1 class="story__title">' + escapeHTML(details.title) + '</h1>' +
+        '<div class="story__score">' + escapeHTML(details.score) + '</div>' +
+        '<div class="story__by">Posted by ' + escapeHTML(details.by) +
+        relativeTime + '</div>';
+  }
+
+  function storyDetailsTemplate(details) {
+    var hostname = '';
+    var externalLink = '';
+    var visitLink = '';
+    var relativeTime = details.time ? ', ' + formatRelative(details.time) : '';
+
+    if (details.urlobj) {
+      hostname = ' <a class="story-details__title-link" href="' +
+          escapeAttribute(details.url) + '">(' +
+          escapeHTML(details.urlobj.hostname) + ')</a>';
+      visitLink = '<div><a class="story-details__link" href="' +
+          escapeAttribute(details.url) + '">Visit site</a></div>';
+    }
+
+    if (details.kids && details.kids.length) {
+      externalLink = '<section class="story-details__comments js-comments">' +
+          '<h2 class="story-details__comments-title">Comments</h2>' +
+          '</section>';
+    }
+
+    return '<header class="story-details__header js-header">' +
+        '<h1 class="story-details__title">' + escapeHTML(details.title) +
+        hostname + '</h1>' +
+        '<button class="story-details__close js-close">Close</button>' +
+        '<section class="story-details__meta">Posted by ' +
+        escapeHTML(details.by) + relativeTime + '</section>' +
+        '</header>' +
+        '<section class="story-details__content js-content">' +
+        visitLink + externalLink +
+        '</section>';
+  }
+
+  function storyDetailsCommentTemplate(details) {
+    var relativeTime = details.time ? ', ' + formatRelative(details.time) : '';
+
+    return '<p class="story-details-comment__author">' +
+        escapeHTML(details.by) + relativeTime + '</p>' +
+        '<div class="story-details-comment__text">' +
+        (details.text || '') + '</div>';
+  }
+
+  function normalizeStoryTime(details) {
+    if (details && details.time && details.time < 1000000000000)
+      details.time *= 1000;
+  }
+
+  function onStoryData(key, details) {
+    var story = document.getElementById('s-' + key);
+
+    if (!story || !details)
+      return;
+
+    normalizeStoryTime(details);
+    story.innerHTML = storyTemplate(details);
+    story.addEventListener('click', onStoryClick.bind(this, details));
+    story.classList.add('clickable');
+
+    scheduleStoryVisualUpdate();
   }
 
   function onStoryClick(details) {
+    var storyDetails = document.getElementById('sd-' + details.id);
 
-    var storyDetails = $('sd-' + details.id);
+    if (!storyDetails)
+      storyDetails = createStoryDetails(details);
 
-    // Wait a little time then show the story details.
-    setTimeout(showStory.bind(this, details.id), 60);
+    showStory(details.id);
+  }
 
-    // Create and append the story. A visual change...
-    // perhaps that should be in a requestAnimationFrame?
-    // And maybe, since they're all the same, I don't
-    // need to make a new element every single time? I mean,
-    // it inflates the DOM and I can only see one at once.
-    if (!storyDetails) {
+  function createStoryDetails(details) {
+    var storyDetails;
+    var storyHeader;
+    var storyContent;
+    var commentsElement;
+    var closeButton;
 
-      if (details.url)
+    if (details.url) {
+      try {
         details.urlobj = new URL(details.url);
-
-      var comment;
-      var commentsElement;
-      var storyHeader;
-      var storyContent;
-
-      var storyDetailsHtml = storyDetailsTemplate(details);
-      var kids = details.kids;
-      var commentHtml = storyDetailsCommentTemplate({
-        by: '', text: 'Loading comment...'
-      });
-
-      storyDetails = document.createElement('section');
-      storyDetails.setAttribute('id', 'sd-' + details.id);
-      storyDetails.classList.add('story-details');
-      storyDetails.innerHTML = storyDetailsHtml;
-
-      document.body.appendChild(storyDetails);
-
-      commentsElement = storyDetails.querySelector('.js-comments');
-      storyHeader = storyDetails.querySelector('.js-header');
-      storyContent = storyDetails.querySelector('.js-content');
-
-      var closeButton = storyDetails.querySelector('.js-close');
-      closeButton.addEventListener('click', hideStory.bind(this, details.id));
-
-      var headerHeight = storyHeader.getBoundingClientRect().height;
-      storyContent.style.paddingTop = headerHeight + 'px';
-
-      if (typeof kids === 'undefined')
-        return;
-
-      for (var k = 0; k < kids.length; k++) {
-
-        comment = document.createElement('aside');
-        comment.setAttribute('id', 'sdc-' + kids[k]);
-        comment.classList.add('story-details__comment');
-        comment.innerHTML = commentHtml;
-        commentsElement.appendChild(comment);
-
-        // Update the comment with the live data.
-        APP.Data.getStoryComment(kids[k], function(commentDetails) {
-
-          commentDetails.time *= 1000;
-
-          var comment = commentsElement.querySelector(
-              '#sdc-' + commentDetails.id);
-          comment.innerHTML = storyDetailsCommentTemplate(
-              commentDetails,
-              localeData);
-        });
+      } catch (err) {
+        details.urlobj = null;
       }
     }
 
+    storyDetails = document.createElement('section');
+    storyDetails.setAttribute('id', 'sd-' + details.id);
+    storyDetails.classList.add('story-details');
+    storyDetails.innerHTML = storyDetailsTemplate(details);
+
+    document.body.appendChild(storyDetails);
+
+    storyHeader = storyDetails.querySelector('.js-header');
+    storyContent = storyDetails.querySelector('.js-content');
+    commentsElement = storyDetails.querySelector('.js-comments');
+    closeButton = storyDetails.querySelector('.js-close');
+
+    closeButton.addEventListener('click', hideStory.bind(this, details.id));
+    storyContent.style.paddingTop =
+        storyHeader.getBoundingClientRect().height + 'px';
+
+    if (commentsElement && details.kids && details.kids.length)
+      setupCommentLoader(storyContent, commentsElement, details.kids);
+
+    return storyDetails;
+  }
+
+  function setupCommentLoader(storyContent, commentsElement, kids) {
+    var state = {
+      kids: kids,
+      next: 0,
+      active: 0
+    };
+
+    function maybeLoadMoreComments() {
+      if (state.active || state.next >= state.kids.length)
+        return;
+
+      loadCommentBatch(state, commentsElement, storyContent,
+          maybeLoadMoreComments);
+    }
+
+    storyContent.addEventListener('scroll', function() {
+      var distanceFromBottom = storyContent.scrollHeight -
+          storyContent.scrollTop - storyContent.clientHeight;
+
+      if (distanceFromBottom < COMMENT_LOAD_THRESHOLD)
+        maybeLoadMoreComments();
+    }, { passive: true });
+
+    maybeLoadMoreComments();
+  }
+
+  function loadCommentBatch(state, commentsElement, storyContent, onComplete) {
+    var end = Math.min(state.next + COMMENT_BATCH_SIZE, state.kids.length);
+    var fragment = document.createDocumentFragment();
+    var commentIds = state.kids.slice(state.next, end);
+
+    state.next = end;
+    state.active = commentIds.length;
+
+    for (var i = 0; i < commentIds.length; i++) {
+      var comment = document.createElement('aside');
+      comment.setAttribute('id', 'sdc-' + commentIds[i]);
+      comment.classList.add('story-details__comment');
+      comment.innerHTML = storyDetailsCommentTemplate({
+        by: '',
+        text: 'Loading comment...'
+      });
+      fragment.appendChild(comment);
+    }
+
+    commentsElement.appendChild(fragment);
+
+    commentIds.forEach(function(commentId) {
+      APP.Data.getStoryComment(commentId, function(commentDetails) {
+        var comment;
+
+        state.active--;
+
+        if (commentDetails) {
+          normalizeStoryTime(commentDetails);
+          comment = commentsElement.querySelector('#sdc-' + commentDetails.id);
+
+          if (comment)
+            comment.innerHTML = storyDetailsCommentTemplate(commentDetails);
+        }
+
+        if (!state.active && storyContent.scrollHeight <=
+            storyContent.clientHeight && state.next < state.kids.length) {
+          onComplete();
+        }
+      });
+    });
   }
 
   function showStory(id) {
+    var storyDetails = document.getElementById('sd-' + id);
 
-    if (inDetails)
+    if (!storyDetails || inDetails)
       return;
 
     inDetails = true;
-
-    var storyDetails = $('#sd-' + id);
-    var left = null;
-
-    if (!storyDetails)
-      return;
-
     document.body.classList.add('details-active');
-    storyDetails.style.opacity = 1;
 
-    function animate () {
-
-      // Find out where it currently is.
-      var storyDetailsPosition = storyDetails.getBoundingClientRect();
-
-      // Set the left value if we don't have one already.
-      if (left === null)
-        left = storyDetailsPosition.left;
-
-      // Now figure out where it needs to go.
-      left += (0 - storyDetailsPosition.left) * 0.1;
-
-      // Set up the next bit of the animation if there is more to do.
-      if (Math.abs(left) > 0.5)
-        setTimeout(animate, 4);
-      else
-        left = 0;
-
-      // And update the styles. Wait, is this a read-write cycle?
-      // I hope I don't trigger a forced synchronous layout!
-      storyDetails.style.left = left + 'px';
-    }
-
-    // We want slick, right, so let's do a setTimeout
-    // every few milliseconds. That's going to keep
-    // it all tight. Or maybe we're doing visual changes
-    // and they should be in a requestAnimationFrame
-    setTimeout(animate, 4);
+    requestAnimationFrame(function() {
+      storyDetails.classList.add('story-details--visible');
+    });
   }
 
   function hideStory(id) {
+    var storyDetails = document.getElementById('sd-' + id);
 
-    if (!inDetails)
+    if (!storyDetails || !inDetails)
       return;
 
-    var storyDetails = $('#sd-' + id);
-    var left = 0;
-
     document.body.classList.remove('details-active');
-    storyDetails.style.opacity = 0;
+    storyDetails.classList.remove('story-details--visible');
 
-    function animate () {
+    function finishHide() {
+      storyDetails.removeEventListener('transitionend', onTransitionEnd);
+      inDetails = false;
+    }
 
-      // Find out where it currently is.
-      var mainPosition = main.getBoundingClientRect();
-      var storyDetailsPosition = storyDetails.getBoundingClientRect();
-      var target = mainPosition.width + 100;
-
-      // Now figure out where it needs to go.
-      left += (target - storyDetailsPosition.left) * 0.1;
-
-      // Set up the next bit of the animation if there is more to do.
-      if (Math.abs(left - target) > 0.5) {
-        setTimeout(animate, 4);
-      } else {
-        left = target;
-        inDetails = false;
+    function onTransitionEnd(evt) {
+      if (evt.propertyName !== 'transform' &&
+          evt.propertyName !== '-webkit-transform') {
+        return;
       }
 
-      // And update the styles. Wait, is this a read-write cycle?
-      // I hope I don't trigger a forced synchronous layout!
-      storyDetails.style.left = left + 'px';
+      finishHide();
     }
 
-    // We want slick, right, so let's do a setTimeout
-    // every few milliseconds. That's going to keep
-    // it all tight. Or maybe we're doing visual changes
-    // and they should be in a requestAnimationFrame
-    setTimeout(animate, 4);
+    storyDetails.addEventListener('transitionend', onTransitionEnd);
+    setTimeout(finishHide, 300);
   }
 
-  /**
-   * Does this really add anything? Can we do this kind
-   * of work in a cheaper way?
-   */
+  function scheduleStoryVisualUpdate() {
+    if (visualUpdateScheduled)
+      return;
+
+    visualUpdateScheduled = true;
+    requestAnimationFrame(colorizeAndScaleStories);
+  }
+
   function colorizeAndScaleStories() {
-
     var storyElements = document.querySelectorAll('.story');
+    var mainPosition = main.getBoundingClientRect();
+    var mainHeight = main.clientHeight || 1;
+    var reads = [];
 
-    // It does seem awfully broad to change all the
-    // colors every time!
+    visualUpdateScheduled = false;
+
     for (var s = 0; s < storyElements.length; s++) {
-
       var story = storyElements[s];
-      var score = story.querySelector('.story__score');
-      var title = story.querySelector('.story__title');
+      var storyPosition = story.getBoundingClientRect();
 
-      // Base the scale on the y position of the score.
-      var height = main.offsetHeight;
-      var mainPosition = main.getBoundingClientRect();
-      var scoreLocation = score.getBoundingClientRect().top -
-          document.body.getBoundingClientRect().top;
-      var scale = Math.min(1, 1 - (0.05 * ((scoreLocation - 170) / height)));
-      var opacity = Math.min(1, 1 - (0.5 * ((scoreLocation - 170) / height)));
+      if (storyPosition.bottom < mainPosition.top - 120 ||
+          storyPosition.top > mainPosition.bottom + 120) {
+        continue;
+      }
 
-      score.style.width = (scale * 40) + 'px';
-      score.style.height = (scale * 40) + 'px';
-      score.style.lineHeight = (scale * 40) + 'px';
+      reads.push({
+        story: story,
+        score: story.querySelector('.story__score'),
+        title: story.querySelector('.story__title'),
+        top: storyPosition.top - mainPosition.top + 16
+      });
+    }
 
-      // Now figure out how wide it is and use that to saturate it.
-      scoreLocation = score.getBoundingClientRect();
-      var saturation = (100 * ((scoreLocation.width - 38) / 2));
+    for (var i = 0; i < reads.length; i++) {
+      var item = reads[i];
+      var scale = Math.max(0.88, Math.min(1,
+          1 - (0.05 * ((item.top - 170) / mainHeight))));
+      var opacity = Math.max(0.45, Math.min(1,
+          1 - (0.5 * ((item.top - 170) / mainHeight))));
+      var saturation = Math.round(60 + (scale * 40));
 
-      score.style.backgroundColor = 'hsl(42, ' + saturation + '%, 50%)';
-      title.style.opacity = opacity;
+      if (item.score) {
+        item.score.style.webkitTransform = 'scale(' + scale + ')';
+        item.score.style.transform = 'scale(' + scale + ')';
+        item.score.style.backgroundColor = 'hsl(42, ' + saturation + '%, 50%)';
+      }
+
+      if (item.title)
+        item.title.style.opacity = opacity;
     }
   }
 
-  main.addEventListener('touchstart', function(evt) {
+  function scheduleScrollUpdate() {
+    if (scrollUpdateScheduled)
+      return;
 
-    // I just wanted to test what happens if touchstart
-    // gets canceled. Hope it doesn't block scrolling on mobiles...
-    if (Math.random() > 0.97) {
-      evt.preventDefault();
-    }
+    scrollUpdateScheduled = true;
+    requestAnimationFrame(updateForScroll);
+  }
 
-  });
-
-  main.addEventListener('scroll', function() {
-
-    var header = $('header');
-    var headerTitles = header.querySelector('.header__title-wrapper');
-    var scrollTopCapped = Math.min(70, main.scrollTop);
+  function updateForScroll() {
+    var scrollTop = main.scrollTop;
+    var scrollTopCapped = Math.min(70, scrollTop);
     var scaleString = 'scale(' + (1 - (scrollTopCapped / 300)) + ')';
+    var loadThreshold = main.scrollHeight - main.clientHeight -
+        LAZY_LOAD_THRESHOLD;
 
-    colorizeAndScaleStories();
+    scrollUpdateScheduled = false;
 
     header.style.height = (156 - scrollTopCapped) + 'px';
     headerTitles.style.webkitTransform = scaleString;
     headerTitles.style.transform = scaleString;
 
-    // Add a shadow to the header.
-    if (main.scrollTop > 70)
+    if (scrollTop > 70)
       document.body.classList.add('raised');
     else
       document.body.classList.remove('raised');
 
-    // Check if we need to load the next batch of stories.
-    var loadThreshold = (main.scrollHeight - main.offsetHeight -
-        LAZY_LOAD_THRESHOLD);
-    if (main.scrollTop > loadThreshold)
+    colorizeAndScaleStories();
+
+    if (scrollTop > loadThreshold)
       loadStoryBatch();
-  });
+  }
+
+  main.addEventListener('scroll', scheduleScrollUpdate, { passive: true });
+
+  function enqueueStoryRequest(id, key, onComplete) {
+    storyRequestQueue.push({
+      id: id,
+      key: key,
+      onComplete: onComplete
+    });
+    pumpStoryRequests();
+  }
+
+  function pumpStoryRequests() {
+    while (activeStoryRequests < MAX_STORY_REQUESTS &&
+        storyRequestQueue.length) {
+      var request = storyRequestQueue.shift();
+      activeStoryRequests++;
+
+      APP.Data.getStoryById(request.id, function(queuedRequest) {
+        return function(details) {
+          activeStoryRequests--;
+          onStoryData(queuedRequest.key, details);
+          queuedRequest.onComplete();
+          pumpStoryRequests();
+        };
+      }(request));
+    }
+  }
 
   function loadStoryBatch() {
+    var batch;
+    var fragment;
+    var remaining;
+    var completed = 0;
 
-    if (storyLoadCount > 0)
+    if (storyBatchLoading || !stories || storyStart >= stories.length)
       return;
 
-    storyLoadCount = count;
+    remaining = stories.length - storyStart;
+    batch = stories.slice(storyStart, storyStart + Math.min(BATCH_SIZE,
+        remaining));
+    storyStart += batch.length;
+    storyBatchLoading = true;
 
-    var end = storyStart + count;
-    for (var i = storyStart; i < end; i++) {
+    fragment = document.createDocumentFragment();
 
-      if (i >= stories.length)
-        return;
-
-      var key = String(stories[i]);
+    batch.forEach(function(id) {
+      var key = String(id);
       var story = document.createElement('div');
+
       story.setAttribute('id', 's-' + key);
       story.classList.add('story');
       story.innerHTML = storyTemplate({
@@ -344,18 +456,25 @@ APP.Main = (function() {
         by: '...',
         time: 0
       });
-      main.appendChild(story);
+      fragment.appendChild(story);
+    });
 
-      APP.Data.getStoryById(stories[i], onStoryData.bind(this, key));
-    }
+    main.appendChild(fragment);
 
-    storyStart += count;
+    batch.forEach(function(id) {
+      enqueueStoryRequest(id, String(id), function() {
+        completed++;
 
+        if (completed === batch.length) {
+          storyBatchLoading = false;
+          scheduleStoryVisualUpdate();
+        }
+      });
+    });
   }
 
-  // Bootstrap in the stories.
   APP.Data.getTopStories(function(data) {
-    stories = data;
+    stories = data || [];
     loadStoryBatch();
     main.classList.remove('loading');
   });

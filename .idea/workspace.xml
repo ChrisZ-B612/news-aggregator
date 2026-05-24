@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="da4a26d9-deb4-4b26-a64d-b961409ac543" name="Changes" comment="" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ChangesViewManager" show_ignored="true" />
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitSEFilterConfiguration">
+    <file-type-list>
+      <filtered-out-file-type name="LOCAL_BRANCH" />
+      <filtered-out-file-type name="REMOTE_BRANCH" />
+      <filtered-out-file-type name="TAG" />
+      <filtered-out-file-type name="COMMIT_BY_MESSAGE" />
+    </file-type-list>
+  </component>
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="PropertiesComponent">
+    <property name="last_opened_file_path" value="$PROJECT_DIR$" />
+  </component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
+    </key>
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="主要优化点：&#10;1. 仅加载可见区域的详情数据 - getStoryById / onStoryData&#10;2. 仅改动可见区域的分数和标题的视效 - colorizeAndScaleStories&#10;3. colorizeAndScaleStories 分离批量读和批量写，避免了 FSL 问题&#10;4. scroll 和 colorizeAndScaleStories 通过 throttleInRAF / requestAnimationFrame 优化&#10;5. StoryDetail 弹窗改用 transform 动画&#10;6. 移除 details-active - 都盖上隐藏了还搞啥视效？&#10;7. 添加 will-change - .header__title-wrapper, .story__title&#10;&#10;次要优化点：&#10;1. 每页加载数据 100 -&gt; 30&#10;2. 仅保留一个并复用 storyDetails 节点&#10;3. 应用 DocumentFragment 批量添加 DOM 节点" />
+    <option name="LAST_COMMIT_MESSAGE" value="主要优化点：&#10;1. 仅加载可见区域的详情数据 - getStoryById / onStoryData&#10;2. 仅改动可见区域的分数和标题的视效 - colorizeAndScaleStories&#10;3. colorizeAndScaleStories 分离批量读和批量写，避免了 FSL 问题&#10;4. scroll 和 colorizeAndScaleStories 通过 throttleInRAF / requestAnimationFrame 优化&#10;5. StoryDetail 弹窗改用 transform 动画&#10;6. 移除 details-active - 都盖上隐藏了还搞啥视效？&#10;7. 添加 will-change - .header__title-wrapper, .story__title&#10;&#10;次要优化点：&#10;1. 每页加载数据 100 -&gt; 30&#10;2. 仅保留一个并复用 storyDetails 节点&#10;3. 应用 DocumentFragment 批量添加 DOM 节点" />
+  </component>
+</project>
